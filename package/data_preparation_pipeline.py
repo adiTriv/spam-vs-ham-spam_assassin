@@ -165,21 +165,28 @@ class SpamAssassinDataPreparation:
             except Exception as e:
                 print(f'ERROR: some error occurred in writing file: {file_path}: {str(e)}')
 
-    def preprocess_file_content(self, file, file_path):
-        file_content = file.read()
-        content_split = file_content.split('\n\n', 1)
+    def clean_text_data(self, text):
+        content_split = text.split('\n\n', 1)
 
         if len(content_split) > 1:
             # If there are two parts, save the content
-            email_body = content_split[1]
+            clean_text = content_split[1]
         else:
             # In case where there is no header
-            email_body = file_content
+            clean_text = text
 
-        email_body = self.remove_numbers(email_body)
-        email_body = self.remove_urls(email_body)
-        email_body = self.decode_quoted_printable_text(email_body)
-        email_body = self.remove_html_tags(email_body)
+        clean_text = self.remove_numbers(clean_text)
+        clean_text = self.remove_urls(clean_text)
+        clean_text = self.decode_quoted_printable_text(clean_text)
+        clean_text = self.remove_html_tags(clean_text)
+
+        return clean_text
+
+    def preprocess_file_content(self, file, file_path):
+        file_content = file.read()
+
+        # clean file content
+        email_body = self.clean_text_data(file_content)
 
         # Write the cleaned text back to the file
         with open(file_path, 'w') as file:
@@ -187,6 +194,16 @@ class SpamAssassinDataPreparation:
                 file.write(email_body)
             except Exception:
                 print(f'ERROR: some error occurred in writing file: {file_path}')
+
+    def create_keyword_frequency_dict(self, content):
+        row = {}
+
+        for keyword in self.spam_email_keywords:
+            matches = re.findall(keyword.lower(), content.lower())
+
+            row[keyword] = len(matches)
+
+        return row
 
     """
     --------------------------------------------------------
@@ -296,18 +313,10 @@ class SpamAssassinDataPreparation:
 
                     try:
                         with open(file_path, 'r') as email_file:
-
-                            # TODO: preprocessing left to remove headers, URLs, etc.
-
                             file_content = email_file.read()
 
-                            row = {}
-
-                            for keyword in self.spam_email_keywords:
-                                matches = re.findall(keyword.lower(), file_content.lower())
-
-                                row[keyword] = len(matches)
-
+                            row = self.create_keyword_frequency_dict(file_content)
+                            
                             # add label to row
                             # row['Label'] = 'spam' if isSpam else 'ham'
                             row['Label'] = is_spam
@@ -331,6 +340,12 @@ class SpamAssassinDataPreparation:
         print('data CSV prepared'.center(30, '-'), end='\n\n')
 
         return self.data_csv_file
+
+    def run_prediction_data_processing_pipeline(self, email_content):
+        clean_content = self.clean_text_data(email_content)
+        keyword_dict = self.create_keyword_frequency_dict(clean_content)
+
+        return keyword_dict
 
     # !! currently unused
     def decode_base64_encoded_files(self):

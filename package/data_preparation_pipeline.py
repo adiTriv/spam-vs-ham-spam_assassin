@@ -8,6 +8,7 @@ import re
 import csv
 import base64
 import numpy as np
+import pandas as pd
 import quopri
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 
@@ -356,6 +357,12 @@ class SpamAssassinDataPreparation:
         keyword_dict = self.create_keyword_frequency_dict(clean_content)
 
         return keyword_dict
+
+    def predict(self, clf, email_content):
+        test_dict = self.run_prediction_data_processing_pipeline(email_content)
+        test_frame = pd.DataFrame(test_dict, index=[0])
+
+        return clf.predict(test_frame)[0]
 
     # !! currently unused
     def decode_base64_encoded_files(self):

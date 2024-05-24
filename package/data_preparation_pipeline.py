@@ -31,23 +31,9 @@ class SpamAssassinDataPreparation:
 
         self.downloaded_data_dir = os.path.abspath('./dataset/downloaded-data')
         self.data_csv_file = os.path.abspath('./dataset/data.csv')
+        self.keyword_txt_file = os.path.abspath('./dataset/keywords.txt')
         self.combined_data_dir = os.path.abspath('./dataset/combined-data')
         self.spam_samples_dir = os.path.join(self.downloaded_data_dir, 'spam')
-
-        # self.spam_email_keywords = [
-        #     'Guaranteed', 'Free', 'join', 'offer', 'click', 'save',
-        #     'instant', 'lowest', 'apply', 'form', 'loan', 'lowest',
-        #     'Interest Rates', 'credit', 'sexually', 'horny', 'sex',
-        #     'benefits', 'agent', 'Opportunities', 'Opportunity',
-        #     'marketing', 'ad', 'advertisement', 'Targeted', 'Retirement', 'plan',
-        #     'Insurance', 'up to', 'pension', 'RISK',
-        #     'Sale', 'discount', 'Limited time offer',
-        #     'urgent', 'Act now', 'Save money', 'Special promotion',
-        #     'Cash', 'Prize', 'Congratulations', 'Amazing',
-        #     'Exclusive', 'Secret', 'No obligation', 'Best price', 'Once in a lifetime',
-        #     'Incredible deal', 'Buy now', 'Now or never', "Don't miss out",
-        #     'email list', 'ADVANTAGE', 'perfect'
-        # ]
 
         self.spam_email_keywords = None
 
@@ -198,12 +184,32 @@ class SpamAssassinDataPreparation:
     def create_keyword_frequency_dict(self, content):
         row = {}
 
-        for keyword in self.spam_email_keywords:
+        # Try to get keywords first from instance var, if not present try looking into saved keyword file
+        keywords = self.spam_email_keywords if self.spam_email_keywords else self.read_keyword_from_txt_file()
+
+        # If both of the above methods fail raise exception
+        if not keywords:
+            raise RuntimeError('ERROR: Spam keywords are not available')
+
+        for keyword in keywords:
             matches = re.findall(keyword.lower(), content.lower())
 
             row[keyword] = len(matches)
 
         return row
+
+    def save_keywords_to_txt_file(self, keywords):
+        with open(self.keyword_txt_file, 'w') as file:
+            file.write(','.join(keywords))
+
+    def read_keyword_from_txt_file(self):
+        try:
+            with open(self.keyword_txt_file, 'r') as file:
+                words = file.read().split(',')
+
+                return words
+        except FileNotFoundError:
+            return None
 
     """
     --------------------------------------------------------
@@ -285,6 +291,10 @@ class SpamAssassinDataPreparation:
                 print(f"{word_total}: {tfidf_score_total}")
 
         self.spam_email_keywords = keywords
+
+        # save keywords to text file, for use in prediction
+        self.save_keywords_to_txt_file(keywords)
+
         print(f"LOG: {len(keywords)} keywords are extracted from spam examples")
 
     def walk_and_create_csv_of_spam_keywords(self):

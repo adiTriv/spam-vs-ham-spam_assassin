@@ -8,6 +8,7 @@ import re
 import csv
 import base64
 import numpy as np
+import pandas as pd
 import quopri
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 
@@ -31,23 +32,9 @@ class SpamAssassinDataPreparation:
 
         self.downloaded_data_dir = os.path.abspath('./dataset/downloaded-data')
         self.data_csv_file = os.path.abspath('./dataset/data.csv')
+        self.keyword_txt_file = os.path.abspath('./dataset/keywords.txt')
         self.combined_data_dir = os.path.abspath('./dataset/combined-data')
         self.spam_samples_dir = os.path.join(self.downloaded_data_dir, 'spam')
-
-        # self.spam_email_keywords = [
-        #     'Guaranteed', 'Free', 'join', 'offer', 'click', 'save',
-        #     'instant', 'lowest', 'apply', 'form', 'loan', 'lowest',
-        #     'Interest Rates', 'credit', 'sexually', 'horny', 'sex',
-        #     'benefits', 'agent', 'Opportunities', 'Opportunity',
-        #     'marketing', 'ad', 'advertisement', 'Targeted', 'Retirement', 'plan',
-        #     'Insurance', 'up to', 'pension', 'RISK',
-        #     'Sale', 'discount', 'Limited time offer',
-        #     'urgent', 'Act now', 'Save money', 'Special promotion',
-        #     'Cash', 'Prize', 'Congratulations', 'Amazing',
-        #     'Exclusive', 'Secret', 'No obligation', 'Best price', 'Once in a lifetime',
-        #     'Incredible deal', 'Buy now', 'Now or never', "Don't miss out",
-        #     'email list', 'ADVANTAGE', 'perfect'
-        # ]
 
         self.spam_email_keywords = None
 
@@ -165,21 +152,28 @@ class SpamAssassinDataPreparation:
             except Exception as e:
                 print(f'ERROR: some error occurred in writing file: {file_path}: {str(e)}')
 
-    def preprocess_file_content(self, file, file_path):
-        file_content = file.read()
-        content_split = file_content.split('\n\n', 1)
+    def clean_text_data(self, text):
+        content_split = text.split('\n\n', 1)
 
         if len(content_split) > 1:
             # If there are two parts, save the content
-            email_body = content_split[1]
+            clean_text = content_split[1]
         else:
             # In case where there is no header
-            email_body = file_content
+            clean_text = text
 
-        email_body = self.remove_numbers(email_body)
-        email_body = self.remove_urls(email_body)
-        email_body = self.decode_quoted_printable_text(email_body)
-        email_body = self.remove_html_tags(email_body)
+        clean_text = self.remove_numbers(clean_text)
+        clean_text = self.remove_urls(clean_text)
+        clean_text = self.decode_quoted_printable_text(clean_text)
+        clean_text = self.remove_html_tags(clean_text)
+
+        return clean_text
+
+    def preprocess_file_content(self, file, file_path):
+        file_content = file.read()
+
+        # clean file content
+        email_body = self.clean_text_data(file_content)
 
         # Write the cleaned text back to the file
         with open(file_path, 'w') as file:
@@ -187,6 +181,36 @@ class SpamAssassinDataPreparation:
                 file.write(email_body)
             except Exception:
                 print(f'ERROR: some error occurred in writing file: {file_path}')
+
+    def create_keyword_frequency_dict(self, content):
+        row = {}
+
+        # Try to get keywords first from instance var, if not present try looking into saved keyword file
+        keywords = self.spam_email_keywords if self.spam_email_keywords else self.read_keyword_from_txt_file()
+
+        # If both of the above methods fail raise exception
+        if not keywords:
+            raise RuntimeError('ERROR: Spam keywords are not available')
+
+        for keyword in keywords:
+            matches = re.findall(keyword.lower(), content.lower())
+
+            row[keyword] = len(matches)
+
+        return row
+
+    def save_keywords_to_txt_file(self, keywords):
+        with open(self.keyword_txt_file, 'w') as file:
+            file.write(','.join(keywords))
+
+    def read_keyword_from_txt_file(self):
+        try:
+            with open(self.keyword_txt_file, 'r') as file:
+                words = file.read().split(',')
+
+                return words
+        except FileNotFoundError:
+            return None
 
     """
     --------------------------------------------------------
@@ -268,6 +292,10 @@ class SpamAssassinDataPreparation:
                 print(f"{word_total}: {tfidf_score_total}")
 
         self.spam_email_keywords = keywords
+
+        # save keywords to text file, for use in prediction
+        self.save_keywords_to_txt_file(keywords)
+
         print(f"LOG: {len(keywords)} keywords are extracted from spam examples")
 
     def walk_and_create_csv_of_spam_keywords(self):
@@ -296,18 +324,10 @@ class SpamAssassinDataPreparation:
 
                     try:
                         with open(file_path, 'r') as email_file:
-
-                            # TODO: preprocessing left to remove headers, URLs, etc.
-
                             file_content = email_file.read()
 
-                            row = {}
-
-                            for keyword in self.spam_email_keywords:
-                                matches = re.findall(keyword.lower(), file_content.lower())
-
-                                row[keyword] = len(matches)
-
+                            row = self.create_keyword_frequency_dict(file_content)
+                            
                             # add label to row
                             # row['Label'] = 'spam' if isSpam else 'ham'
                             row['Label'] = is_spam
@@ -331,6 +351,18 @@ class SpamAssassinDataPreparation:
         print('data CSV prepared'.center(30, '-'), end='\n\n')
 
         return self.data_csv_file
+
+    def run_prediction_data_processing_pipeline(self, email_content):
+        clean_content = self.clean_text_data(email_content)
+        keyword_dict = self.create_keyword_frequency_dict(clean_content)
+
+        return keyword_dict
+
+    def predict(self, clf, email_content):
+        test_dict = self.run_prediction_data_processing_pipeline(email_content)
+        test_frame = pd.DataFrame(test_dict, index=[0])
+
+        return clf.predict(test_frame)[0]
 
     # !! currently unused
     def decode_base64_encoded_files(self):
